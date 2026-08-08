@@ -1,0 +1,12 @@
+{
+  "name": "ig-auto-dm",
+  "version": "1.0.0",
+  "description": "Instagram comment-to-DM automation using the official Meta Graph API",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "mongodb": "^6.5.0"
+  }
+}
