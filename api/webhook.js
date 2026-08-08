@@ -22,6 +22,9 @@ module.exports = async (req, res) => {
   if (req.method === "POST") {
     try {
       const body = req.body;
+      // TEMPORARY DEBUG — remove once the flow is confirmed working.
+      console.log("RAW WEBHOOK BODY:", JSON.stringify(body));
+
       // Always 200 fast — Meta retries aggressively if you're slow or error out.
       res.status(200).send("EVENT_RECEIVED");
 
