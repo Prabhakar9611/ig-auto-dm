@@ -22,11 +22,7 @@ module.exports = async (req, res) => {
   if (req.method === "POST") {
     try {
       const body = req.body;
-      // TEMPORARY DEBUG — remove once the flow is confirmed working.
       console.log("RAW WEBHOOK BODY:", JSON.stringify(body));
-
-      // Always 200 fast — Meta retries aggressively if you're slow or error out.
-      res.status(200).send("EVENT_RECEIVED");
 
       const entries = body.entry || [];
       for (const entry of entries) {
@@ -45,8 +41,14 @@ module.exports = async (req, res) => {
           }
         }
       }
+
+      // Respond LAST — after all work is done, not before. Sending the
+      // response early risked Vercel freezing execution before the
+      // MongoDB check and DM send actually completed.
+      res.status(200).send("EVENT_RECEIVED");
     } catch (err) {
       console.error("Webhook processing error:", err);
+      res.status(200).send("EVENT_RECEIVED"); // still 200 so Meta doesn't retry-storm us
     }
     return;
   }
@@ -60,12 +62,22 @@ async function handleComment(comment) {
   const commentText = comment.text;
   const mediaId = comment.media?.id;
 
-  if (!commentId || !commentText) return;
-  if (await alreadyHandled(commentId)) return;
+  console.log("handleComment called:", { commentId, commentText, mediaId });
+
+  if (!commentId || !commentText) {
+    console.log("Missing commentId or commentText, exiting");
+    return;
+  }
+
+  const handled = await alreadyHandled(commentId);
+  console.log("alreadyHandled result:", handled);
+  if (handled) return;
 
   const reelConfig = mediaId ? getConfigForMedia(mediaId) : null;
   const keywords = reelConfig?.keywords;
-  if (!matchesTrigger(commentText, keywords)) return;
+  const matched = matchesTrigger(commentText, keywords);
+  console.log("matchesTrigger result:", matched, "keywords used:", keywords || process.env.IG_TRIGGER_KEYWORDS);
+  if (!matched) return;
 
   const buttons = [
     {
@@ -85,11 +97,13 @@ async function handleComment(comment) {
     },
   ];
 
+  console.log("Sending private reply with buttons...");
   await sendPrivateReplyWithButtons(
     commentId,
     "Thanks for your interest! Are you following the page?",
     buttons
   );
+  console.log("Private reply sent successfully");
 
   await markHandled(commentId, comment.from?.id);
 }
