@@ -22,6 +22,7 @@ module.exports = async (req, res) => {
   if (req.method === "POST") {
     try {
       const body = req.body;
+      console.log("VERSION-B-DEPLOYED — debug build active");
       console.log("RAW WEBHOOK BODY:", JSON.stringify(body));
 
       const entries = body.entry || [];
