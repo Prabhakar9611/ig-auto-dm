@@ -2,6 +2,7 @@ const { matchesTrigger } = require("../lib/keywordMatcher");
 const {
   sendPrivateReplyWithButtons,
   sendMessageToUser,
+  sendButtonMessageToUser,
 } = require("../lib/instagram");
 const { alreadyHandled, markHandled } = require("../lib/db");
 const { getReelConfigFromCaption } = require("../lib/captionParser");
@@ -104,13 +105,26 @@ async function handlePostback(event) {
 
   const [action, mediaId] = payload.split("::");
 
-  if (action === "FOLLOW_YES") {
-    let message = process.env.IG_DM_MESSAGE; // fallback if caption has no config
+if (action === "FOLLOW_YES") {
+    let captionConfig = null;
     if (mediaId && mediaId !== "default") {
-      const captionConfig = await getReelConfigFromCaption(mediaId);
-      if (captionConfig) message = captionConfig.message;
+      captionConfig = await getReelConfigFromCaption(mediaId);
     }
-    await sendMessageToUser(senderId, message);
+
+    if (captionConfig) {
+      const buttons = [
+        { type: "web_url", title: "Apply Now", url: captionConfig.applyLink },
+        { type: "web_url", title: "WhatsApp Channel", url: process.env.IG_WHATSAPP_CHANNEL_LINK },
+        { type: "web_url", title: "YouTube", url: process.env.IG_YOUTUBE_LINK },
+      ];
+      await sendButtonMessageToUser(
+        senderId,
+        captionConfig.company ? `${captionConfig.company} — here's everything 👇` : "Here's everything 👇",
+        buttons
+      );
+    } else {
+      await sendMessageToUser(senderId, process.env.IG_DM_MESSAGE);
+    }
   } else if (action === "FOLLOW_NO") {
     const fallbackMessage =
       `No worries! Follow the page, then come back and tap "I'm Following" again.\n` +
