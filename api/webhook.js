@@ -4,7 +4,7 @@ const {
   sendMessageToUser,
 } = require("../lib/instagram");
 const { alreadyHandled, markHandled } = require("../lib/db");
-const { getConfigForMedia } = require("../lib/reelConfig");
+const { getReelConfigFromCaption } = require("../lib/captionParser");
 
 module.exports = async (req, res) => {
   // ---- Meta's one-time webhook verification handshake ----
@@ -22,10 +22,8 @@ module.exports = async (req, res) => {
   if (req.method === "POST") {
     try {
       const body = req.body;
-      console.log("VERSION-B-DEPLOYED — debug build active");
-      console.log("RAW WEBHOOK BODY:", JSON.stringify(body));
-
       const entries = body.entry || [];
+
       for (const entry of entries) {
         // ---- CASE 1: someone commented on a Reel/post ----
         const changes = entry.changes || [];
@@ -43,9 +41,6 @@ module.exports = async (req, res) => {
         }
       }
 
-      // Respond LAST — after all work is done, not before. Sending the
-      // response early risked Vercel freezing execution before the
-      // MongoDB check and DM send actually completed.
       res.status(200).send("EVENT_RECEIVED");
     } catch (err) {
       console.error("Webhook processing error:", err);
@@ -57,28 +52,22 @@ module.exports = async (req, res) => {
   res.status(405).send("Method not allowed");
 };
 
-// Step 1: comment matches trigger keyword -> send the 3-button prompt.
+// Step 1: comment matches the Reel's own caption-defined trigger word ->
+// send the 3-button prompt.
 async function handleComment(comment) {
   const commentId = comment.id;
   const commentText = comment.text;
   const mediaId = comment.media?.id;
 
-  console.log("handleComment called:", { commentId, commentText, mediaId });
+  if (!commentId || !commentText) return;
+  if (await alreadyHandled(commentId)) return;
 
-  if (!commentId || !commentText) {
-    console.log("Missing commentId or commentText, exiting");
-    return;
-  }
+  const captionConfig = mediaId ? await getReelConfigFromCaption(mediaId) : null;
 
-  const handled = await alreadyHandled(commentId);
-  console.log("alreadyHandled result:", handled);
-  if (handled) return;
-
-  const reelConfig = mediaId ? getConfigForMedia(mediaId) : null;
-  const keywords = reelConfig?.keywords;
-  const matched = matchesTrigger(commentText, keywords);
-  console.log("matchesTrigger result:", matched, "keywords used:", keywords || process.env.IG_TRIGGER_KEYWORDS);
-  if (!matched) return;
+  // Use the Reel's own caption-defined trigger if set, otherwise fall back
+  // to the global IG_TRIGGER_KEYWORDS env var.
+  const keywords = captionConfig ? [captionConfig.trigger] : undefined;
+  if (!matchesTrigger(commentText, keywords)) return;
 
   const buttons = [
     {
@@ -98,13 +87,11 @@ async function handleComment(comment) {
     },
   ];
 
-  console.log("Sending private reply with buttons...");
   await sendPrivateReplyWithButtons(
     commentId,
     "Thanks for your interest! Are you following the page?",
     buttons
   );
-  console.log("Private reply sent successfully");
 
   await markHandled(commentId, comment.from?.id);
 }
@@ -116,11 +103,14 @@ async function handlePostback(event) {
   if (!senderId || !payload) return;
 
   const [action, mediaId] = payload.split("::");
-  const reelConfig = mediaId && mediaId !== "default" ? getConfigForMedia(mediaId) : null;
 
   if (action === "FOLLOW_YES") {
-    const jobMessage = reelConfig?.message || process.env.IG_DM_MESSAGE;
-    await sendMessageToUser(senderId, jobMessage);
+    let message = process.env.IG_DM_MESSAGE; // fallback if caption has no config
+    if (mediaId && mediaId !== "default") {
+      const captionConfig = await getReelConfigFromCaption(mediaId);
+      if (captionConfig) message = captionConfig.message;
+    }
+    await sendMessageToUser(senderId, message);
   } else if (action === "FOLLOW_NO") {
     const fallbackMessage =
       `No worries! Follow the page, then come back and tap "I'm Following" again.\n` +
